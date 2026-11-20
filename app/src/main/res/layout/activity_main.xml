@@ -1,16 +1,28 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/root_layout"
     android:layout_width="match_parent" android:layout_height="match_parent"
     android:orientation="vertical" android:background="#101010" android:padding="16dp">
     <TextView android:id="@+id/title" android:layout_width="match_parent" android:layout_height="wrap_content"
         android:text="Universal Player" android:textColor="#FFFFFF" android:textSize="20sp"
         android:textStyle="bold" android:paddingBottom="14dp" />
-    <androidx.media3.ui.PlayerView android:id="@+id/player_view"
-        android:layout_width="match_parent" android:layout_height="0dp"
-        android:layout_weight="1" android:background="#000000"
-        android:keepScreenOn="true" />
+    <FrameLayout android:layout_width="match_parent" android:layout_height="0dp"
+        android:layout_weight="1" android:background="#000000">
+        <androidx.media3.ui.PlayerView android:id="@+id/player_view"
+            android:layout_width="match_parent" android:layout_height="match_parent"
+            android:background="#000000" android:keepScreenOn="true" />
+        <Button android:id="@+id/full_screen" android:layout_width="wrap_content"
+            android:layout_height="40dp" android:layout_gravity="top|end"
+            android:layout_margin="10dp" android:text="Full screen" android:textAllCaps="false" />
+        <TextView android:id="@+id/gesture_hint" android:layout_width="wrap_content"
+            android:layout_height="wrap_content" android:layout_gravity="bottom|center_horizontal"
+            android:layout_marginBottom="56dp" android:background="#AA000000"
+            android:padding="10dp" android:textColor="#FFFFFF" android:textSize="16sp"
+            android:visibility="gone" />
+    </FrameLayout>
     <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
-        android:orientation="horizontal" android:gravity="center" android:paddingTop="16dp">
+        android:id="@+id/controls_row" android:orientation="horizontal"
+        android:gravity="center" android:paddingTop="16dp">
         <Button android:id="@+id/open_video" android:layout_width="0dp" android:layout_height="48dp"
             android:layout_weight="1" android:text="Open videos" android:textAllCaps="false" />
         <Button android:id="@+id/next_video" android:layout_width="0dp" android:layout_height="48dp"
