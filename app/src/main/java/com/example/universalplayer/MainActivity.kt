@@ -13,7 +13,6 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -21,7 +20,6 @@ import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.Player
-import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.common.Tracks
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
@@ -39,7 +37,7 @@ class MainActivity : AppCompatActivity() {
     private val videos = mutableListOf<Uri>()
     private var currentIndex = 0
     private var externalSubtitle: Uri? = null
-    private var promptedSubtitleFor: Uri? = null
+    private var selectedSubtitleFor: Uri? = null
     private var isFullScreen = false
 
     private var touchStartX = 0f
@@ -50,12 +48,6 @@ class MainActivity : AppCompatActivity() {
     private var lastHintAt = 0L
 
     private enum class GestureSide { NONE, BRIGHTNESS, VOLUME }
-
-    private data class SubtitleChoice(
-        val group: Tracks.Group,
-        val trackIndex: Int,
-        val label: String
-    )
 
     private val pickVideos = registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
         if (uris.isNullOrEmpty()) return@registerForActivityResult
@@ -99,7 +91,7 @@ class MainActivity : AppCompatActivity() {
             playerView.player = exoPlayer
             exoPlayer.addListener(object : Player.Listener {
                 override fun onTracksChanged(tracks: Tracks) {
-                    promptForSubtitles(tracks)
+                    selectEmbeddedSubtitleIfPresent(tracks)
                 }
             })
         }
@@ -113,10 +105,10 @@ class MainActivity : AppCompatActivity() {
         val p = player ?: return
         if (videos.isEmpty()) return
         val uri = videos[currentIndex]
-        promptedSubtitleFor = null
+        selectedSubtitleFor = null
         p.trackSelectionParameters = p.trackSelectionParameters.buildUpon()
             .clearOverridesOfType(C.TRACK_TYPE_TEXT)
-            .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
+            .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
             .build()
 
         val item = MediaItem.Builder().setUri(uri)
@@ -136,40 +128,34 @@ class MainActivity : AppCompatActivity() {
         titleView.text = "Video ${currentIndex + 1} of ${videos.size}"
     }
 
-    private fun promptForSubtitles(tracks: Tracks) {
+    private fun selectEmbeddedSubtitleIfPresent(tracks: Tracks) {
         val uri = videos.getOrNull(currentIndex) ?: return
-        if (promptedSubtitleFor == uri) return
-        val choices = buildList {
+        if (selectedSubtitleFor == uri) return
+        val availableTracks = buildList {
             tracks.groups.forEach { group ->
                 if (group.type != C.TRACK_TYPE_TEXT) return@forEach
                 for (trackIndex in 0 until group.length) {
                     if (!group.isTrackSupported(trackIndex)) continue
                     val format = group.getTrackFormat(trackIndex)
-                    val description = format.label?.takeIf { it.isNotBlank() }
-                        ?: format.language?.takeIf { it.isNotBlank() && it != "und" }
-                        ?: "Subtitle ${size + 1}"
-                    add(SubtitleChoice(group, trackIndex, description))
+                    add(Triple(group, trackIndex, (format.selectionFlags and C.SELECTION_FLAG_DEFAULT) != 0))
                 }
             }
         }
-        if (choices.isEmpty()) return
-        promptedSubtitleFor = uri
-        val options = listOf("No subtitles") + choices.map { it.label }
-        AlertDialog.Builder(this)
-            .setTitle("Choose subtitles")
-            .setItems(options.toTypedArray()) { _, selected ->
-                val p = player ?: return@setItems
-                val builder = p.trackSelectionParameters.buildUpon()
-                    .clearOverridesOfType(C.TRACK_TYPE_TEXT)
-                    .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, selected == 0)
-                if (selected > 0) {
-                    val choice = choices[selected - 1]
-                    builder.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
-                        .addOverride(TrackSelectionOverride(choice.group.mediaTrackGroup, listOf(choice.trackIndex)))
-                }
-                p.trackSelectionParameters = builder.build()
-            }
-            .show()
+        if (availableTracks.isEmpty()) return
+
+        selectedSubtitleFor = uri
+        val hasSelectedTrack = tracks.groups.any { group ->
+            group.type == C.TRACK_TYPE_TEXT && (0 until group.length).any { index -> group.isTrackSelected(index) }
+        }
+        if (hasSelectedTrack) return
+
+        val p = player ?: return
+        val chosen = availableTracks.firstOrNull { it.third } ?: availableTracks.first()
+        p.trackSelectionParameters = p.trackSelectionParameters.buildUpon()
+            .clearOverridesOfType(C.TRACK_TYPE_TEXT)
+            .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
+            .addOverride(androidx.media3.common.TrackSelectionOverride(chosen.first.mediaTrackGroup, chosen.second))
+            .build()
     }
 
     private fun subtitleMime(uri: Uri): String {
