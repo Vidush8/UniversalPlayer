@@ -38,6 +38,7 @@ class MainActivity : AppCompatActivity() {
     private var currentIndex = 0
     private var externalSubtitle: Uri? = null
     private var selectedSubtitleFor: Uri? = null
+    private var subtitleScanReportedFor: Uri? = null
     private var isFullScreen = false
 
     private var touchStartX = 0f
@@ -93,6 +94,12 @@ class MainActivity : AppCompatActivity() {
                 override fun onTracksChanged(tracks: Tracks) {
                     selectEmbeddedSubtitleIfPresent(tracks)
                 }
+
+                override fun onPlaybackStateChanged(playbackState: Int) {
+                    if (playbackState == Player.STATE_READY) {
+                        selectEmbeddedSubtitleIfPresent(exoPlayer.currentTracks)
+                    }
+                }
             })
         }
         playerView.useController = true
@@ -106,6 +113,7 @@ class MainActivity : AppCompatActivity() {
         if (videos.isEmpty()) return
         val uri = videos[currentIndex]
         selectedSubtitleFor = null
+        subtitleScanReportedFor = null
         p.trackSelectionParameters = p.trackSelectionParameters.buildUpon()
             .clearOverridesOfType(C.TRACK_TYPE_TEXT)
             .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
@@ -135,14 +143,29 @@ class MainActivity : AppCompatActivity() {
             tracks.groups.forEach { group ->
                 if (group.type != C.TRACK_TYPE_TEXT) return@forEach
                 for (trackIndex in 0 until group.length) {
-                    if (!group.isTrackSupported(trackIndex)) continue
                     val format = group.getTrackFormat(trackIndex)
-                    add(Triple(group, trackIndex, (format.selectionFlags and C.SELECTION_FLAG_DEFAULT) != 0))
+                    val label = format.label?.takeIf { it.isNotBlank() }
+                        ?: format.language?.takeIf { it.isNotBlank() && it != "und" }
+                        ?: "Subtitle ${size + 1}"
+                    add(SubtitleTrack(
+                        group,
+                        trackIndex,
+                        (format.selectionFlags and C.SELECTION_FLAG_DEFAULT) != 0,
+                        label
+                    ))
                 }
             }
         }
-        if (availableTracks.isEmpty()) return
+        if (availableTracks.isEmpty()) {
+            val p = player
+            if (p?.playbackState == Player.STATE_READY && subtitleScanReportedFor != uri) {
+                subtitleScanReportedFor = uri
+                Toast.makeText(this, "No embedded subtitle tracks were detected in this video", Toast.LENGTH_LONG).show()
+            }
+            return
+        }
 
+        subtitleScanReportedFor = uri
         selectedSubtitleFor = uri
         val hasSelectedTrack = tracks.groups.any { group ->
             group.type == C.TRACK_TYPE_TEXT && (0 until group.length).any { index -> group.isTrackSelected(index) }
@@ -150,13 +173,21 @@ class MainActivity : AppCompatActivity() {
         if (hasSelectedTrack) return
 
         val p = player ?: return
-        val chosen = availableTracks.firstOrNull { it.third } ?: availableTracks.first()
+        val chosen = availableTracks.firstOrNull { it.isDefault } ?: availableTracks.first()
         p.trackSelectionParameters = p.trackSelectionParameters.buildUpon()
             .clearOverridesOfType(C.TRACK_TYPE_TEXT)
             .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
-            .addOverride(androidx.media3.common.TrackSelectionOverride(chosen.first.mediaTrackGroup, chosen.second))
+            .addOverride(androidx.media3.common.TrackSelectionOverride(chosen.group.mediaTrackGroup, chosen.trackIndex))
             .build()
+        Toast.makeText(this, "Playing subtitle track: ${chosen.label}", Toast.LENGTH_LONG).show()
     }
+
+    private data class SubtitleTrack(
+        val group: Tracks.Group,
+        val trackIndex: Int,
+        val isDefault: Boolean,
+        val label: String
+    )
 
     private fun subtitleMime(uri: Uri): String {
         val name = uri.lastPathSegment?.lowercase().orEmpty()
