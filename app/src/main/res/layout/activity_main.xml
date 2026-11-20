@@ -29,5 +29,8 @@
             android:layout_weight="1" android:text="Next" android:textAllCaps="false" android:layout_marginStart="8dp" />
         <Button android:id="@+id/subtitles" android:layout_width="0dp" android:layout_height="48dp"
             android:layout_weight="1" android:text="Subs" android:textAllCaps="false" android:layout_marginStart="8dp" />
+        <Button android:id="@+id/embedded_subtitles" android:layout_width="0dp" android:layout_height="48dp"
+            android:layout_weight="1" android:text="Tracks" android:textAllCaps="false"
+            android:layout_marginStart="8dp" android:contentDescription="Choose embedded subtitles" />
     </LinearLayout>
 </LinearLayout>

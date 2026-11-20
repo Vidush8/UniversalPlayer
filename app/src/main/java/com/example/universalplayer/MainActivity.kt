@@ -13,6 +13,7 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -86,6 +87,9 @@ class MainActivity : AppCompatActivity() {
         findViewById<Button>(R.id.subtitles).setOnClickListener {
             pickSubtitle.launch(arrayOf("text/*", "application/x-subrip", "application/octet-stream"))
         }
+        findViewById<Button>(R.id.embedded_subtitles).setOnClickListener {
+            showEmbeddedSubtitleChooser()
+        }
         fullScreenButton.setOnClickListener { setFullScreen(!isFullScreen) }
 
         player = ExoPlayer.Builder(this).build().also { exoPlayer ->
@@ -139,23 +143,7 @@ class MainActivity : AppCompatActivity() {
     private fun selectEmbeddedSubtitleIfPresent(tracks: Tracks) {
         val uri = videos.getOrNull(currentIndex) ?: return
         if (selectedSubtitleFor == uri) return
-        val availableTracks = buildList {
-            tracks.groups.forEach { group ->
-                if (group.type != C.TRACK_TYPE_TEXT) return@forEach
-                for (trackIndex in 0 until group.length) {
-                    val format = group.getTrackFormat(trackIndex)
-                    val label = format.label?.takeIf { it.isNotBlank() }
-                        ?: format.language?.takeIf { it.isNotBlank() && it != "und" }
-                        ?: "Subtitle ${size + 1}"
-                    add(SubtitleTrack(
-                        group,
-                        trackIndex,
-                        (format.selectionFlags and C.SELECTION_FLAG_DEFAULT) != 0,
-                        label
-                    ))
-                }
-            }
-        }
+        val availableTracks = subtitleTracks(tracks)
         if (availableTracks.isEmpty()) {
             val p = player
             if (p?.playbackState == Player.STATE_READY && subtitleScanReportedFor != uri) {
@@ -182,10 +170,74 @@ class MainActivity : AppCompatActivity() {
         Toast.makeText(this, "Playing subtitle track: ${chosen.label}", Toast.LENGTH_LONG).show()
     }
 
+    private fun subtitleTracks(tracks: Tracks): List<SubtitleTrack> = buildList {
+        tracks.groups.forEach { group ->
+            if (group.type != C.TRACK_TYPE_TEXT) return@forEach
+            for (trackIndex in 0 until group.length) {
+                val format = group.getTrackFormat(trackIndex)
+                val language = format.language?.takeIf { it.isNotBlank() && it != "und" }
+                val codec = format.sampleMimeType ?: format.codecs
+                val trackNumber = size + 1
+                val label = listOfNotNull(
+                    format.label?.takeIf { it.isNotBlank() },
+                    language,
+                    codec
+                ).distinct().joinToString(" · ").ifBlank { "Subtitle track $trackNumber" }
+                add(SubtitleTrack(
+                    group,
+                    trackIndex,
+                    (format.selectionFlags and C.SELECTION_FLAG_DEFAULT) != 0,
+                    group.isTrackSupported(trackIndex),
+                    label
+                ))
+            }
+        }
+    }
+
+    private fun showEmbeddedSubtitleChooser() {
+        val p = player ?: return
+        if (videos.isEmpty()) {
+            Toast.makeText(this, "Choose a video first", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val tracks = subtitleTracks(p.currentTracks)
+        if (tracks.isEmpty()) {
+            Toast.makeText(this, "No embedded subtitle tracks were detected in this video", Toast.LENGTH_LONG).show()
+            return
+        }
+        val options = listOf("Off") + tracks.mapIndexed { index, track ->
+            val state = when {
+                track.group.isTrackSelected(track.trackIndex) -> "✓ "
+                !track.isSupported -> "⚠ "
+                else -> ""
+            }
+            "$state${index + 1}. ${track.label}"
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Embedded subtitles")
+            .setItems(options.toTypedArray()) { _, selected ->
+                val builder = p.trackSelectionParameters.buildUpon()
+                    .clearOverridesOfType(C.TRACK_TYPE_TEXT)
+                    .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, selected == 0)
+                if (selected > 0) {
+                    val track = tracks[selected - 1]
+                    builder.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
+                        .addOverride(androidx.media3.common.TrackSelectionOverride(track.group.mediaTrackGroup, track.trackIndex))
+                }
+                p.trackSelectionParameters = builder.build()
+                selectedSubtitleFor = videos.getOrNull(currentIndex)
+                if (selected > 0) {
+                    Toast.makeText(this, "Selected: ${tracks[selected - 1].label}", Toast.LENGTH_LONG).show()
+                }
+            }
+            .show()
+    }
+
     private data class SubtitleTrack(
         val group: Tracks.Group,
         val trackIndex: Int,
         val isDefault: Boolean,
+        val isSupported: Boolean,
         val label: String
     )
 
